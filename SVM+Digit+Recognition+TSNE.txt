@@ -1,0 +1,382 @@
+#Problem Statement
+#Business Understanding
+#A classic problem in the field of pattern recognition is that of handwritten digit recognition.
+#Suppose that you have an image of a digit submitted by a user via a scanner, a tablet, or 
+#other digital devices. The goal is to develop a model that can 
+#correctly identify the digit (between 0-9) written in an image. 
+
+
+
+#Objective
+#You are required to develop a model using Support Vector Machine which should correctly classify 
+#the handwritten digits based on the pixel values given as features.
+
+#Soution Step Taken :
+# I have followed CRISP data framework to solve this business problem.
+#############################################################################
+#                     Data Understanding:
+#############################################################################
+# There are two files in the zip file provide, mnist train and mnist test. 
+# Train contains 60000 observations and it is 784(1) dimentional data set.
+# The first variable does the digit. 
+# Upon checking , digit 0 has maximum intensity and 1 has least intesity
+# There are no header and there is no missing values in the data set.
+
+#############################################################################
+#                     Data Preparation
+#############################################################################
+# As dimensionality reduction is required for this data set, so I merged the
+# training and testing data set and performed the latest TSNE method to
+# reduce the dimensionality. 
+# Every time we run TSNE , there will difference in results so that might impact 
+# the final accuracy but it is only for demical points effect.Over all the computation
+# is much faster than PCA or factor analysis techniques to run the analysis.
+# I checked with PCA , 260 dimension were required to maintain more than 90% of the 
+# variaibility of the data set and when we use KSVM it is too much computationally expensive
+# With TSNE by default i choose to keep the dim =2 and thetha =0.05 and got 97% accuracy.
+# I tried with dim =3 and 4 as well , accuracy was different and with dim =100, system crashed.
+#######################################################################################
+
+#######################################################################################
+# Model Buliding
+#######################################################################################
+
+# Three different Models were used
+# KSVM with C = 1 and C = 10
+# Using cross validation using svmLinear
+# Using cross Validation using svmRadial
+
+#######################################################################################
+# Model Buliding
+#######################################################################################
+# I used confusion matrix to get the accuracy , the final model chosen as approx 97% of accuracy
+
+#######################################################################################
+# Install Packages and Load Libraries
+#######################################################################################
+
+install.packages('caret')
+install.packages('kernlab')
+install.packages('dplyr')
+install.packages('readr')
+install.packages('ggplot2')
+install.packages('gridExtra')
+install.packages('Rtsne')
+install.packages("doParallel")
+
+
+library('caret')
+library('kernlab')
+library('dplyr')
+library('readr')
+library('ggplot2')
+library('gridExtra')
+library('Rtsne')
+library('doParallel')
+library('tidyr')
+
+# read files
+mnist_train <- read.csv(file = "mnist_train.csv",header = F,stringsAsFactors = F)
+mnist_test <- read.csv(file ="mnist_test.csv",header = F,stringsAsFactors = F)
+
+#######################################################################################
+# Intensity Graph
+#######################################################################################
+m <-mnist_train
+
+m$intensity <- apply(m[,-1], 1, mean) #takes the mean of each row in train
+colnames(m)[1] <- "Label"
+intbylabel <- aggregate (m$intensity, by = list(m$Label), FUN = mean)
+
+plot <- ggplot(data=intbylabel, aes(x=Group.1, y = x)) +
+  geom_bar(stat="identity")
+plot + scale_x_discrete(limits=0:9) + xlab("digit label") + 
+  ylab("average intensity")
+
+# From the graph it is clear that 0 is most intense and 1 is least intense.
+#######################################################################################
+# to know how to image looks like
+#######################################################################################
+pixels_gathered <- m %>%
+  head(10000) %>%
+  rename(label = Label) %>%
+  mutate(instance = row_number()) %>%
+  gather(pixel, value, -label, -instance) %>%
+  tidyr::extract(pixel, "pixel", "(\\d+)", convert = TRUE) %>%
+  mutate(pixel = pixel - 2,
+         x = pixel %% 28,
+         y = 28 - pixel %/% 28)
+
+pixels_gathered
+
+theme_set(theme_light())
+
+pixels_gathered %>%
+  filter(instance <= 12) %>%
+  ggplot(aes(x, y, fill = value)) +
+  geom_tile() +
+  facet_wrap(~ instance + label)
+
+#######################################################################################
+# Change the first dimension which is digit to Digit_Label
+#######################################################################################
+
+colnames(mnist_train)[1] <- "Digit_Label"
+colnames(mnist_test)[1] <- "Digit_Label"
+
+
+#######################################################################################
+# EDA
+#######################################################################################
+
+dim(mnist_train)
+str(mnist_train)
+sum(is.na(mnist_train))
+
+dim(mnist_test)
+str(mnist_test)
+sum(is.na(mnist_test))
+mnist_Merged = rbind(mnist_train,mnist_test)
+
+
+#######################################################################################
+# Spread of each digit
+#######################################################################################
+
+### Count of each Digit 
+
+cd <- c('0','1','2','3','4','5','6','7','8','9')
+digitcount<-as.data.frame(table(mnist_train$Digit_Label))
+plot_digitcount <-ggplot(digitcount,aes(x=reorder(Var1,-Freq),Freq,fill = cd))+geom_bar(stat = "identity")
+plot_digitcount+geom_text(aes(label = Freq), vjust = -0.3,size = 3) + labs(title = "Count of Each Digit", x= "Digit")
+
+
+summary(factor(mnist_test$Digit_Label))
+cd <- c('0','1','2','3','4','5','6','7','8','9')
+digitcount1<-as.data.frame(table(mnist_test$Digit_Label))
+plot_digitcount1 <-ggplot(digitcount1,aes(x=reorder(Var1,-Freq),Freq,fill = cd))+geom_bar(stat = "identity")
+plot_digitcount1+geom_text(aes(label = Freq), vjust = -0.3,size = 3) + labs(title = "Count of Each Digit", x= "Digit")
+
+dim(mnist_Merged)
+
+#######################################################################################
+# Dimensionality Reduction using TSNE : Preferred over PCA, preprocess and factor analysis
+#######################################################################################
+# Rtsne command will take 19 mintues to perform the activity
+colors = rainbow(length(unique(mnist_Merged$Digit_Label)))
+names(colors) = unique(mnist_Merged$Digit_Label)
+tsne <- Rtsne(mnist_Merged[,-1], check_duplicates = FALSE, pca = TRUE, 
+              perplexity = 30, theta = 0.5, dims = 2,verbose = TRUE, max_iter = 500)
+
+## Plotting
+plot(tsne$Y, t='n', main="tsne")
+text(tsne$Y, labels=mnist_Merged$Digit_Label, col=colors[mnist_Merged$Digit_Label])
+
+
+tsne_1 <- as.data.frame(tsne$Y)
+dim(tsne_1)
+mnist_train_1 <- tsne_1[1:60000,]
+mnist_test_1 <- tsne_1[60001:70000,]
+
+# Check if first column needs to be joined.
+
+mnist_train_fcol <- mnist_train[,1]
+mnist_test_fcol <- mnist_test[,1]
+
+mnist_train_1 <- cbind(mnist_train_fcol,mnist_train_1)
+mnist_test_1 <-cbind(mnist_test_fcol,mnist_test_1)
+
+dim(mnist_train_1)
+dim(mnist_test_1)
+mnist_train_1$mnist_train_fcol = as.factor(mnist_train_1$mnist_train_fcol)
+mnist_test_1$mnist_test_fcol = as.factor(mnist_test_1$mnist_test_fcol)
+colnames(mnist_test_1)[1] <- "Digit_Label"
+colnames(mnist_train_1)[1] <- "Digit_Label"
+# set seed
+#######################################################################################
+# Model Data is ready to be consumed by KSVM algo
+#######################################################################################
+
+set.seed(2000)
+mnist_sample7030 = sample(2,nrow(mnist_train_1),replace = T,prob = c(0.7,0.3))
+mnist_train_final =mnist_train_1[mnist_sample7030==1, ]
+mnist_validation = mnist_train_1[mnist_sample7030==2, ]
+dim(mnist_train_final)
+dim(mnist_validation)
+
+# Perform SVm
+
+kvsm_model_1<- ksvm(Digit_Label ~ ., data = mnist_train_final)
+kvsm_model_1
+summary(kvsm_model_1)
+
+pred_1 = predict(kvsm_model_1,mnist_validation)
+confusionMatrix(pred_1,mnist_validation$Digit_Label) 
+# Validation Accuracy : 0.967 ( Results might vary as TSNE gives different results with each run)
+
+mnist_test_1$pred_1 = predict(kvsm_model_1,mnist_test_1)
+confusionMatrix(mnist_test_1$pred_1,mnist_test_1$Digit_Label) 
+# Testing Accuracy : 0.9705
+
+########## Give the condiation C=10 in same model #############################
+kvsm_model_2<- ksvm(Digit_Label ~ ., data = mnist_train_final,C=10)
+summary(kvsm_model_2)
+kvsm_model_2
+
+pred_2 = predict(kvsm_model_2,mnist_validation)
+confusionMatrix(mnist_validation$Digit_Label,pred_2) 
+# Validation Accuracy : 0.9685
+
+
+mnist_test_1$pred_2 = predict(kvsm_model_2,mnist_test_1)
+confusionMatrix(mnist_test_1$pred_2,mnist_test_1$Digit_Label) #### testing Accuracy : 0.9683
+
+# Parallel processing core detection and use
+cl = makeCluster(detectCores())
+registerDoParallel(cl)
+
+tr_contl = trainControl(method = "cv",number = 5)
+
+SVM_liner_1 = train(Digit_Label ~ ., data = mnist_train_final,method="svmLinear",trControl=tr_contl)
+SVM_liner_1
+SVM_liner_1$finalModel
+#Accuracy   Kappa    
+#0.957174  0.9523997 c=1
+pred_3 = predict(SVM_liner_1 , mnist_validation)
+confusionMatrix(pred_3,mnist_validation$Digit_Label) ## Validation Accuracy : 0.9521
+
+#Predicting the test data
+mnist_test_1$pred_3 = predict(SVM_liner_1 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_3,mnist_test_1$Digit_Label) ## test Accuracy : 0.9575
+
+SVM_liner_2 = train(Digit_Label~., data = mnist_train_final,method="svmLinear",
+                    trcontrol=tr_contl,tuneLength=5)
+summary(SVM_liner_2)
+SVM_liner_2
+
+#Accuracy   Kappa    
+#0.9568938  0.9520861
+
+## Predicting the Validation data
+pred_4 = predict(SVM_liner_2 , mnist_validation)
+confusionMatrix(pred_4,mnist_validation$Digit_Label) ## Validation Accuracy : 0.9569
+
+### Predicting the test data
+mnist_test_1$pred_4 = predict(SVM_liner_2 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_4,mnist_test_1$Digit_Label) ## test Accuracy : 0.9618
+
+# With the SVM linear accuracy is less than normal model,Lets try with svmRadial
+
+svmRadial_1 = train(Digit_Label ~ ., data = mnist_train_final,method="svmRadial",trControl=tr_contl)
+svmRadial_1
+svmRadial_1$finalModel
+svmRadial_1$bestTune
+
+#1.00  0.9677617  0.9641656
+#The final values used for the model were sigma = 1.141408 and C = 1.
+
+# Predicting the Validation data
+pred_5 = predict(svmRadial_1 , mnist_validation)
+confusionMatrix(pred_5,mnist_validation$Digit_Label) 
+## Validation Accuracy : 0.9634
+
+# Predicting the test data
+mnist_test_1$pred_5 = predict(svmRadial_1 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_5,mnist_test_1$Digit_Label) ## test Accuracy : 0.9672
+
+
+svmRadial_2 = train(Digit_Label ~ ., data = mnist_train_final,method="svmRadial",
+                    trControl=tr_contl,tuneLength=5)
+svmRadial_2$bestTune
+svmRadial_2$finalModel
+svmRadial_2
+#     sigma C
+#5 1.099697 4
+#C     Accuracy   Kappa   
+#0.25  0.9670021  0.9633214
+#0.50  0.9676430  0.9640337
+#1.00  0.9677143  0.9641128
+#2.00  0.9680229  0.9644560
+#4.00  0.9682365  0.9646934
+
+#The final values used for the model were sigma = 1.099697 and C = 4
+
+### Predicting the Validation data
+pred_6 = predict(svmRadial_2 , mnist_validation)
+confusionMatrix(pred_6,mnist_validation$Digit_Label) ## Validation Accuracy : 0.9677
+
+
+### Predicting the test data
+mnist_test_1$pred_6 = predict(svmRadial_2 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_6,mnist_test_1$Digit_Label) ## test Accuracy : 0.9711
+
+
+
+t_grid = expand.grid(.sigma = 1.099697,.C = seq(1,5,1))
+svmRadial_3 = train(Digit_Label ~ ., data = mnist_train_final,method="svmRadial",
+                    trControl=tr_contl,tuneGrid=t_grid)
+svmRadial_3
+svmRadial_3$bestTune
+svmRadial_3$finalModel
+
+#C  Accuracy   Kappa
+#5  0.9684028  0.9648782
+
+# The final values used for the model were sigma =  1.099697 and c=5
+
+
+### Predicting the Validation data
+pred_7 = predict(svmRadial_3 , mnist_validation)
+confusionMatrix(pred_7,mnist_validation$Digit_Label) ## Validation Accuracy : 0.9678
+
+### Predicting the test data
+mnist_test_1$pred_7 = predict(svmRadial_3 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_7,mnist_test_1$Digit_Label) ## test Accuracy : 0.9712
+
+
+
+svmRadial_4 <- train(Digit_Label ~ ., data = mnist_train_final,method="svmRadial",
+                    trControl=tr_contl,tuneLength=6)
+svmRadial_4
+svmRadial_4$bestTune
+svmRadial_4$finalModel
+#   C     Accuracy   Kappa 
+#  8.00  0.9684740  0.9649573
+# The final values used for the model were sigma = 1.132076 and c=8
+
+
+### Predicting the Validation data
+pred_8 = predict(svmRadial_4 , mnist_validation)
+confusionMatrix(pred_8,mnist_validation$Digit_Label) ## Validation Accuracy :  0.9683
+
+### Predicting the test data
+mnist_test_1$pred_8 = predict(svmRadial_4 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_8,mnist_test_1$Digit_Label) ## test Accuracy : 0.9747
+
+#
+t_grid_1 = expand.grid(.sigma = 1.132076,.C = seq(1,10,1))
+
+svmRadial_5 = train(Digit_Label ~ ., data = mnist_train_final,method="svmRadial",
+                    trControl=tr_contl,tuneGrid=t_grid_1)
+print(svmRadial_5)
+svmRadial_5$finalModel
+svmRadial_5$bestTune
+
+# The final values used for the model were sigma = 1.132076 and C = 10
+#  C   Accuracy   Kappa 
+#  0.9687590  0.9652742
+
+### Predicting the Validation data
+pred_9 = predict(svmRadial_5 , mnist_validation)
+confusionMatrix(pred_9,mnist_validation$Digit_Label) ## Validation Accuracy :  0.9684
+
+mnist_test_1$pred_9 = predict(svmRadial_5 , mnist_test_1)
+confusionMatrix(mnist_test_1$pred_9,mnist_test_1$Digit_Label) ## test Accuracy : 0.9714
+plot(svmRadial_5)
+plot(svmRadial_4)
+stopCluster(cl)
+
+# The final values used for the model were sigma = 1.099697 and C = 4 gave 97.11% accuracy
+# The final values used for the model were sigma = 1.132076 and c = 8 gave 97.47% accuracy.
+# So over all the accuracy of the model is close to 97% and C =4 or 8 with sigma close to 1.1
+ 
